@@ -9,7 +9,14 @@ import (
 	"slices"
 	"strconv"
 	"time"
+
+	"github.com/eliotttak/go-logs/v2"
 )
+
+var logger = logs.New().SetDefaultWriter(func() *os.File {
+	f, _ := os.Create("logs.txt")
+	return f
+}())
 
 const (
 	historyName   = "history.json"
@@ -37,23 +44,61 @@ type step struct {
 
 type steps []step
 
-func (steps *steps) getStep(name string) (step, error) {
+func (steps *steps) getStep(name string) (*step, error) {
 	for _, step := range *steps {
 		if step.Title == name {
-			return step, nil
+			return &step, nil
 		}
 	}
 
-	return step{}, fmt.Errorf("(*main.steps).getStep(): step %s not found", strconv.Quote(name))
+	return nil, fmt.Errorf("(*main.steps).getStep(): step %s not found", strconv.Quote(name))
 }
 
-func (options *options) addNumbers()
+func (options *options) addNumbers() {
+	takenNumbers := []int{}
+	for _, o := range *options {
+		if o.Number != 0 {
+			takenNumbers = append(takenNumbers, o.Number)
+		}
+	}
+
+	index := 1
+	for i, _ := range *options {
+		if (*options)[i].Number == 0 {
+			for slices.Contains(takenNumbers, index) {
+				index++
+			}
+			takenNumbers = append(takenNumbers, index)
+			(*options)[i].Number = index
+		}
+	}
+}
+
+func (options *options) getOption(i int) (*option, error) {
+	for _, o := range *options {
+		if o.Number == i {
+			return &o, nil
+		}
+	}
+
+	return nil, fmt.Errorf("(*main.options).getOption(): option %d not found", i)
+
+}
 
 func printWithTime(t time.Duration, a ...any) {
 	s := fmt.Sprint(a...)
 
 	for _, r := range s {
-		fmt.Print(r)
+		fmt.Printf("%c", r)
+		time.Sleep(t)
+	}
+}
+
+func printfWithTime(t time.Duration, format string, a ...any) {
+	s := fmt.Sprintf(format, a...)
+
+	for _, r := range s {
+		fmt.Printf("%c", r)
 		time.Sleep(t)
 	}
 }
@@ -68,6 +113,10 @@ func makeLinkWithText(url string, text string) string {
 
 func makeLink(url string) string {
 	return makeLinkWithText(url, url)
+}
+
+func makeFileLink(f string) string {
+	return makeLink("file://" + f)
 }
 
 func doesntContain[T comparable](s []T, e T) bool {
@@ -110,14 +159,14 @@ func main() {
 
 	historyJson, err = os.ReadFile(historyPath)
 	if err != nil {
-		log.Fatalf("main.main(): Error reading '%s': %s", makeLink("file://"+historyPath), err.Error())
+		log.Fatalf("main.main(): Error reading '%s': %s", makeFileLink(historyPath), err.Error())
 	}
 
 	// fmt.Printf("%s\n\n", historyJson)
 
 	err = json.Unmarshal(historyJson, &history)
 	if err != nil {
-		log.Fatalf("main.main(): Error parsing '%s': %s", makeLink("file://"+historyPath), err.Error())
+		log.Fatalf("main.main(): Error parsing '%s': %s", makeFileLink(historyPath), err.Error())
 	}
 
 	t := history.MsPerChar
@@ -128,18 +177,48 @@ func main() {
 	}
 
 	for {
+		logger.Logf("step = %#v", step)
 		printWithTime(t, step.Text, "\n\n")
 
-		takenIndexes := []int{}
-		i := 0
+		step.Options.addNumbers()
+
+		var possibleIndexes []int
 		for _, o := range step.Options {
-			if o.Number != 0 && doesntContain(takenIndexes, o.Number) {
-				takenIndexes = append(takenIndexes, o.Number)
-			}
+			possibleIndexes = append(possibleIndexes, o.Number)
 		}
 
 		for _, o := range step.Options {
-			// if
+
+			if !o.Hidden {
+				printfWithTime(t, "%d - %s\n", o.Number, o.Text)
+			}
+		}
+
+		chosenIndex := 0
+		for doesntContain(possibleIndexes, chosenIndex) {
+			var s string
+
+			printWithTime(t, " >>> ")
+			_, err := fmt.Scanln(&s)
+
+			if err != nil {
+				continue
+			}
+
+			n, err := strconv.Atoi(s)
+
+			if err != nil {
+				continue
+			}
+
+			chosenIndex = n
+		}
+
+		option, err := step.Options.getOption(chosenIndex)
+
+		step, err = history.Steps.getStep(option.Goto)
+		if err != nil {
+			log.Fatal(err)
 		}
 	}
 
